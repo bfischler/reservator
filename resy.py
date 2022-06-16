@@ -4,6 +4,8 @@ import time
 import csv
 import json
 import sys
+import pause
+
 
 headers = {
      'origin': 'https://resy.com',
@@ -82,6 +84,7 @@ def try_table(day, party_size, table_time, auth_token, restaurant, payment_metho
     best_table = find_table(day, party_size, table_time, auth_token, restaurant)
     if best_table is not None:
         hour = datetime.datetime.strptime(best_table['date']['start'],"%Y-%m-%d %H:%M:00").hour
+        # TODO: should probably make "interval hours prior" and "interval hours after" configurable
         if hour >= table_time - 2 and hour <= table_time + 2:
             config_id = best_table['config']['token']
             make_reservation(auth_token, config_id, day, party_size, payment_method_string)
@@ -109,6 +112,10 @@ def main():
     dates = json_config['dates']
 
     venue_id = json_config['venue_id']
+
+    # If you know when the reservation will be released...
+    # TODO: should probably turn configurable/a CLI option...
+    # pause.until(datetime.datetime(2022, 4, 19, 10, 47, 0))
 
     reserved = 0
     while reserved == 0:
