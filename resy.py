@@ -4,6 +4,7 @@ import time
 import csv
 import json
 import sys
+import pause
 
 
 headers = {}
@@ -124,10 +125,9 @@ def main():
                     time.sleep(.1)
 
         except Exception as e:
-            pass
-            # with open('failures.csv','a') as outf:
-            #     writer = csv.writer(outf)
-            #     writer.writerow([time.time()])
+            with open('failures.csv','a') as outf:
+                writer = csv.writer(outf)
+                writer.writerow([time.time(), str(e)])
 
 if __name__ == "__main__":
     main()
