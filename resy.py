@@ -34,7 +34,6 @@ def find_table(res_date, party_size, table_time, auth_token, venue_id):
      ('venue_id',str(venue_id)),
     )
     response = requests.get('https://api.resy.com/4/find', headers=headers, params=params)
-    print(str(response.text))
     data = response.json()
     results = data['results']
     if len(results['venues']) > 0:
