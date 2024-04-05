@@ -3,13 +3,29 @@ import datetime
 import time
 import csv
 import json
+import subprocess
 import sys
-import pause
 
 
-headers = {}
-with open("./headers.json") as f:
-    headers = json.load(f)
+headers = {
+     'accept': 'application/json, text/plain, */*',
+     'accept-encoding': 'gzip, deflate, br',
+     'accept-language': 'en-US,en;q=0.9',
+     'authorization': 'ResyAPI api_key="VbWk7s3L4KiK5fzlO7JD3Q5EYolJI7n5"',
+     'authority': 'api.resy.com',
+     'cache-control': 'no-cache',
+     'content-type': 'application/x-www-form-urlencoded',
+     'origin': 'https://resy.com',
+     'referer': 'https://resy.com/',
+     'sec-ch-ua': '"Google Chrome";v="113", "Chromium";v="113", "Not-A.Brand";v="24"',
+     'sec-ch-ua-mobile': '?0',
+     'sec-ch-ua-platform': '"macOS"',
+     'sec-fetch-dest': 'empty',
+     'sec-fetch-mode': 'cors',
+     'sec-fetch-site': 'same-site',
+     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+     'x-origin': 'https://resy.com',
+}
 
 def login(username, password):
     data = {
@@ -23,33 +39,47 @@ def login(username, password):
     payment_method_string = '{"id":' + str(res_data['payment_method_id']) + '}'
     return auth_token, payment_method_string
 
-def find_table(res_date, party_size, table_time, auth_token, venue_id):
-    #convert datetime to string
-    day = res_date.strftime('%Y-%m-%d')
-    params = (
-    #  ('x-resy-auth-token',  auth_token),
-     ('day', day),
-     ('lat', '0'),
-     ('long', '0'),
-     ('party_size', str(party_size)),
-     ('venue_id',str(venue_id)),
-    )
-    response = requests.get('https://api.resy.com/4/find', headers=headers, params=params)
-    data = response.json()
+def find_tables(ideal_time, party_size, auth_token, venue_id):
+    day = ideal_time.strftime('%Y-%m-%d')
+    curl_cmd = f"""
+    curl 'https://api.resy.com/4/find?lat=0&long=0&day={day}&party_size={party_size}&venue_id={venue_id}' \
+    -H 'authority: api.resy.com' \
+    -H 'accept: application/json, text/plain, */*' \
+    -H 'accept-language: en-US,en;q=0.9' \
+    -H 'authorization: ResyAPI api_key="VbWk7s3L4KiK5fzlO7JD3Q5EYolJI7n5"' \
+    -H 'cache-control: no-cache' \
+    -H 'origin: https://resy.com' \
+    -H 'referer: https://resy.com/' \
+    -H 'sec-ch-ua: "Google Chrome";v="113", "Chromium";v="113", "Not-A.Brand";v="24"' \
+    -H 'sec-ch-ua-mobile: ?0' \
+    -H 'sec-ch-ua-platform: "macOS"' \
+    -H 'sec-fetch-dest: empty' \
+    -H 'sec-fetch-mode: cors' \
+    -H 'sec-fetch-site: same-site' \
+    -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36' \
+    -H 'x-origin: https://resy.com' \
+    --compressed
+    """
+
+    process = subprocess.Popen(curl_cmd, stdout=subprocess.PIPE, shell=True)
+    output, error = process.communicate()
+
+    if error:
+        print(f"Error occurred: {error}")
+        return []
+
+    output_str = output.decode("utf-8")  # decode the byte string to a normal string
+    data = json.loads(output_str)  # parse the string as JSON
     results = data['results']
     if len(results['venues']) > 0:
         open_slots = results['venues'][0]['slots']
-        if len(open_slots) > 0:
-            available_times = [(k['date']['start'],datetime.datetime.strptime(k['date']['start'],"%Y-%m-%d %H:%M:00").hour) for k in open_slots]
-            closest_time = min(available_times, key=lambda x:abs(x[1]-table_time))[0]
+        return sorted(open_slots, key=lambda x:abs(
+            datetime.datetime.strptime(x['date']['start'],"%Y-%m-%d %H:%M:00") - ideal_time))
+    return []
 
-            best_table = [k for k in open_slots if k['date']['start'] == closest_time][0]
-
-            return best_table
-
-def make_reservation(auth_token, config_id, res_date, party_size, payment_method_string):
+def make_reservation(auth_token, config_id, ideal_time, party_size, payment_method_string):
     #convert datetime to string
-    day = res_date.strftime('%Y-%m-%d')
+    day = ideal_time.strftime('%Y-%m-%d')
     party_size = str(party_size)
     params = (
          ('x-resy-auth-token', auth_token),
@@ -68,24 +98,37 @@ def make_reservation(auth_token, config_id, res_date, party_size, payment_method
     }
 
     response = requests.post('https://api.resy.com/3/book', headers=headers, data=data)
-    return response
+    try:
+        res = response.json()
+        return res.get("reservation_id")
+    except Exception as e:
+        print(f"Error making reservation: {e}")
+        return None
 
 
-def try_table(day, party_size, table_time, auth_token, restaurant, payment_method_string):
-    best_table = find_table(day, party_size, table_time, auth_token, restaurant)
-    if best_table is not None:
-        hour = datetime.datetime.strptime(best_table['date']['start'],"%Y-%m-%d %H:%M:00").hour
-        # TODO: should probably make "interval hours prior" and "interval hours after" configurable
-        if hour >= table_time - 2 and hour <= table_time + 2:
-            config_id = best_table['config']['token']
-            make_reservation(auth_token, config_id, day, party_size, payment_method_string)
-            return 1
-        else:
-            print(f"table found, but not within time range, found at {hour}")
-            return 0
+def try_table(ideal_time, flexibility_minutes_before, flexibility_minutes_after, party_size, auth_token, restaurant, payment_method_string):
+    best_tables = find_tables(ideal_time, party_size, auth_token, restaurant)
+    if best_tables:
+        for best_table in best_tables:
+            table_time = datetime.datetime.strptime(best_table['date']['start'], "%Y-%m-%d %H:%M:00")
+            time_difference_minutes = (table_time - ideal_time).total_seconds() / 60
+            if (
+                    (0 <= time_difference_minutes <= flexibility_minutes_after)
+                    or (-flexibility_minutes_before <= time_difference_minutes <= 0)):
+                config_id = best_table['config']['token']
+                reservation_id = make_reservation(auth_token, config_id, ideal_time, party_size, payment_method_string)
+                if reservation_id is not None:
+                    print(f"Made reservation! ID: {reservation_id}, time: {table_time}")
+                    return True
+                else:
+                    print(f"Failed at booking step ({table_time})")
+                    continue
+            else:
+                print(f"table found, but not within time range, found at {table_time}")
+                continue
     else:
         print("no table found")
-        return 0
+        return False
 
 
 
@@ -99,35 +142,51 @@ def main():
     print('logged in succesfully')
 
     party_size = json_config['party_size']
-    table_time = json_config['hour']
-    dates = json_config['dates']
+    datetimes = json_config['datetimes']
+    flexibility_minutes_before = json_config.get('flexibility_minutes_before', 0)
+    flexibility_minutes_after = json_config.get('flexibility_minutes_after', 0)
+    attempt_start_time = json_config.get('attempt_start_time')
+    attempt_frequency_seconds = json_config.get('attempt_frequency_seconds', 60)
+    runs_per_attempt = json_config.get('runs_per_attempt', 1)
+    venue_ids = json_config['venue_ids']
 
-    venue_id = json_config['venue_id']
+    reserved = False
+    time_to_try = (
+        datetime.datetime.strptime(attempt_start_time, '%Y-%m-%d %H:%M:%S')
+        if attempt_start_time else datetime.datetime.now().replace(
+            microsecond=0, second=0, minute=0))
+    while True:
+        if time_to_try < datetime.datetime.now():
+            print("Skipping", time_to_try)
+            time_to_try = time_to_try + datetime.timedelta(seconds=attempt_frequency_seconds)
+            continue
+        print("Waiting until", time_to_try)
+        time.sleep((time_to_try - datetime.datetime.now()).total_seconds())
+        time_to_try = time_to_try + datetime.timedelta(seconds=attempt_frequency_seconds)
+        attempt_number = 0
+        while not reserved:
+            attempt_number += 1
+            if attempt_number > runs_per_attempt:
+                break
+            print("Attempt", attempt_number)
+            try:
+                for venue_id in venue_ids:
+                    for dt in datetimes:
+                        ideal_time = datetime.datetime.strptime(dt, '%Y-%m-%d %H:%M:%S')
+                        reserved = try_table(ideal_time, flexibility_minutes_before, flexibility_minutes_after, party_size, auth_token, venue_id, payment_method_string)
 
-    # If you know when the reservation will be released...
-    # TODO: should probably turn configurable/a CLI option...
-    # pause.until(datetime.datetime(2022, 4, 19, 10, 47, 0))
+                        if reserved:
+                            print("reservation successful")
+                            return
+                        else:
+                            print("unable to make reservation")
+                            continue
 
-    reserved = 0
-    while reserved == 0:
-        try:
-            for date in dates:
-                day = datetime.datetime.strptime(date, '%m/%d/%Y')
-                print(f"checking for {date} at {table_time}...")
-                reserved = try_table(day, party_size, table_time, auth_token, venue_id, payment_method_string)
-                print(reserved)
-
-                if reserved:
-                    print("reservation successful")
-                    sys.exit(0)
-                else:
-                    print("unable to make reservation")
-                    time.sleep(.1)
-
-        except Exception as e:
-            with open('failures.csv','a') as outf:
-                writer = csv.writer(outf)
-                writer.writerow([time.time(), str(e)])
+            except Exception as e:
+                print(e)
+                with open('failures.csv','a') as outf:
+                    writer = csv.writer(outf)
+                    writer.writerow([time.time()])
 
 if __name__ == "__main__":
     main()
