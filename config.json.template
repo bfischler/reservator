@@ -1,0 +1,13 @@
+{
+    "email": "my@email.com",
+    "password": "myPa$$w0rd!",
+    "venue_ids": [1505],
+    "datetimes": [
+        "2025-01-29 19:30:00"
+    ],
+    "flexibility_minutes_before": 60,
+    "flexibility_minutes_after": 60,
+    "party_size": 2,
+    "attempt_frequency_seconds": 20,
+    "runs_per_attempt": 1
+}
